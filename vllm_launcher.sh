@@ -13,7 +13,7 @@ set -euo pipefail
 
 HOST="0.0.0.0"
 PORT="4444"
-MODEL_DIR="/media/tom/fast/NoSlop/vllm/models"   # ← change to your preferred download location
+MODEL_DIR="/path/to/folder"   # ← change to your preferred download location
 HF_API="https://huggingface.co/api/models"
 LAST_CMD_FILE="/tmp/vllm_last_command.sh"
 
