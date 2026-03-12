@@ -33,34 +33,52 @@ No more manually hunting for models that fit your GPU, guessing context lengths,
 
 - Linux (tested on Ubuntu 24)
 - `bash`, `curl`, `python3`
-- `vllm` installed in your Python environment (`pip install vllm`)
 - NVIDIA GPU with CUDA drivers, or AMD GPU with ROCm (CPU-only mode also supported)
 
 ---
 
 ## ⚡ Quick Start
 
+### Clone the repo
 ```bash
-# Clone the repo
 git clone https://github.com/gaborkukucska/vllm-loader.git
 cd vllm-loader
+```
 
-# Make the script executable
+### Setup the environment
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### Install Vllm
+```bash
+pip install vllm
+```
+
+### Make the script executable
+```bash
 chmod +x vllm_launcher.sh
+```
 
-# Run the interactive wizard
+### Run the interactive wizard
+```bash
 ./vllm_launcher.sh
+```
 
-# Pre-filter to a specific model family
+### Pre-filter to a specific model family
+```bash
 ./vllm_launcher.sh "mistral 7b"
+```
 
-# Skip the wizard and reuse your last session
+### Skip the wizard and reuse your last session
+```bash
 ./vllm_launcher.sh --relaunch
 ```
 
-Once running, your model is available as an OpenAI-compatible API at:
+### Once running, your model is available as an OpenAI-compatible API at:
 
-```
+```bash
 http://0.0.0.0:4444/v1
 ```
 
