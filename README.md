@@ -41,7 +41,11 @@ No more manually hunting for models that fit your GPU, guessing context lengths,
 ## ⚡ Quick Start
 
 ```bash
-# Clone or download the script
+# Clone the repo
+git clone https://github.com/gaborkukucska/vllm-loader.git
+cd vllm-loader
+
+# Make the script executable
 chmod +x vllm_launcher.sh
 
 # Run the interactive wizard
