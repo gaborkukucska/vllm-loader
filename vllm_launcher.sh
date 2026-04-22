@@ -847,12 +847,16 @@ PYEOF
 
 # ── Dependency checks ─────────────────────────────────────────────────────────
 check_dependencies() {
+    # Always use 'python3 -m pip' so installs go into the active venv/environment
+    # rather than whichever 'pip' the shell resolves (often the system one).
+    local PIP="python3 -m pip install"
+
     # vllm
     if ! python3 -c "import vllm" 2>/dev/null; then
         echo -e "${YELLOW}Warning: vllm not found in current Python environment.${RESET}"
         read -rp "Install vllm now? [Y/n]: " install_now
         if [[ "${install_now,,}" != "n" ]]; then
-            pip install vllm
+            $PIP vllm
         else
             echo -e "${RED}Aborting — vllm not available.${RESET}"; exit 1
         fi
@@ -864,7 +868,7 @@ check_dependencies() {
             if ! python3 -c "import bitsandbytes" 2>/dev/null; then
                 echo -e "${YELLOW}int8 requires 'bitsandbytes'. Install now? [Y/n]: ${RESET}"
                 read -rp "" bnb_install
-                [[ "${bnb_install,,}" != "n" ]] && pip install "bitsandbytes>=0.46.1" || { echo -e "${RED}Aborting.${RESET}"; exit 1; }
+                [[ "${bnb_install,,}" != "n" ]] && $PIP "bitsandbytes>=0.46.1" || { echo -e "${RED}Aborting.${RESET}"; exit 1; }
             else
                 BNB_OK=$(python3 -c "
 import bitsandbytes as bnb, packaging.version as pv
@@ -873,22 +877,24 @@ print('yes' if pv.parse(bnb.__version__) >= pv.parse('0.46.1') else 'no')
                 if [[ "$BNB_OK" == "no" ]]; then
                     echo -e "${YELLOW}bitsandbytes too old (need >=0.46.1). Upgrade? [Y/n]: ${RESET}"
                     read -rp "" bnb_upgrade
-                    [[ "${bnb_upgrade,,}" != "n" ]] && pip install "bitsandbytes>=0.46.1" || { echo -e "${RED}Aborting.${RESET}"; exit 1; }
+                    [[ "${bnb_upgrade,,}" != "n" ]] && $PIP "bitsandbytes>=0.46.1" || { echo -e "${RED}Aborting.${RESET}"; exit 1; }
                 fi
             fi
             ;;
         awq)
-            if ! python3 -c "import autoawq" 2>/dev/null; then
-                echo -e "${YELLOW}AWQ works best with 'autoawq'. Install now? [Y/n]: ${RESET}"
+            if ! python3 -c "import awq" 2>/dev/null; then
+                echo -e "${YELLOW}AWQ requires 'autoawq'. Install now? [Y/n]: ${RESET}"
                 read -rp "" awq_install
-                [[ "${awq_install,,}" != "n" ]] && pip install autoawq
+                [[ "${awq_install,,}" != "n" ]] && $PIP autoawq || { echo -e "${RED}Aborting.${RESET}"; exit 1; }
             fi
             ;;
         gptq)
-            if ! python3 -c "import auto_gptq" 2>/dev/null && ! python3 -c "import optimum" 2>/dev/null; then
-                echo -e "${YELLOW}GPTQ works best with 'auto-gptq'. Install now? [Y/n]: ${RESET}"
+            # 'auto-gptq' is unmaintained and fails to build against modern PyTorch/CUDA.
+            # vLLM's current recommended GPTQ backend is 'gptqmodel'.
+            if ! python3 -c "import gptqmodel" 2>/dev/null; then
+                echo -e "${YELLOW}GPTQ requires 'gptqmodel'. Install now? [Y/n]: ${RESET}"
                 read -rp "" gptq_install
-                [[ "${gptq_install,,}" != "n" ]] && pip install auto-gptq
+                [[ "${gptq_install,,}" != "n" ]] && $PIP gptqmodel || { echo -e "${RED}Aborting.${RESET}"; exit 1; }
             fi
             ;;
     esac
