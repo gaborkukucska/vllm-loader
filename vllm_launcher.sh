@@ -333,15 +333,6 @@ SKIP_PATTERNS = [
 
 # For AWQ/GPTQ: if quant is selected, exclude base (non-quantized) models
 # that share a name with a quantized variant we've already found
-quant_variant_bases = set()
-if quant in ("awq", "gptq"):
-    for model in data:
-        mid = model.get("id", "").lower()
-        if quant in mid or "int4" in mid:
-            # Strip the quant suffix to get the base name
-            base = re.sub(r'[-_](awq|gptq|int4|quantized|4bit).*$', '', mid)
-            quant_variant_bases.add(base)
-
 results = []
 seen_bases = set()
 
@@ -354,15 +345,17 @@ for model in data:
     if any(re.search(p, model_id.lower()) for p in SKIP_PATTERNS):
         continue
 
-    # For AWQ/GPTQ: skip base models when a quantized variant exists
+    # For AWQ/GPTQ: only show models that are actually pre-quantized.
+    # vLLM cannot quantize on the fly, so listing base models is misleading —
+    # they will pass the browser but fail at launch. Strict name-based allowlist.
     if quant in ("awq", "gptq"):
-        base_name = re.sub(r'[-_](awq|gptq|int4|quantized|4bit).*$', '', model_id.lower())
         model_lower = model_id.lower()
         is_quant_variant = quant in model_lower or "int4" in model_lower
-        if not is_quant_variant and base_name in quant_variant_bases:
-            continue  # skip base when quant variant exists
-        # Deduplicate: keep only one variant per base
-        if is_quant_variant and base_name in seen_bases:
+        if not is_quant_variant:
+            continue  # drop any model that isn't clearly a pre-quantized variant
+        # Deduplicate: keep only the first (highest-download) variant per base name
+        base_name = re.sub(r'[-_](awq|gptq|int4|quantized|4bit).*$', '', model_lower)
+        if base_name in seen_bases:
             continue
         seen_bases.add(base_name)
 
@@ -699,6 +692,55 @@ configure_launch() {
         [[ -n "$hf_token" ]] && token_arg="--token ${hf_token}"
     fi
 
+    # ── Tool calling ──────────────────────────────────────────────────────────
+    # --enable-auto-tool-choice lets the model decide when to call tools.
+    # --tool-call-parser must match the model's chat template format or tool
+    # calls will silently malform. We auto-detect from the model name but
+    # always let the user override.
+    local tool_call_arg=""
+    echo ""
+    echo -e "${BOLD}Tool Calling:${RESET}"
+    echo -e "  Required for agentic / function-calling workloads."
+    read -rp "  Enable tool calling? [Y/n]: " enable_tools
+    if [[ "${enable_tools,,}" != "n" ]]; then
+        # Auto-detect the best parser from the model name
+        local detected_parser
+        detected_parser=$(python3 - "${SELECTED_MODEL}" <<'PYEOF'
+import sys, re
+model = sys.argv[1].lower()
+# Ordered from most-specific to least-specific
+if re.search(r'qwen', model):            print("hermes");      exit()
+if re.search(r'hermes|nous', model):     print("hermes");      exit()
+if re.search(r'llama.?3', model):        print("llama3_json"); exit()
+if re.search(r'mistral|mixtral', model): print("mistral");     exit()
+if re.search(r'internlm', model):        print("internlm");    exit()
+if re.search(r'jamba', model):           print("jamba");       exit()
+if re.search(r'granite', model):         print("granite-20b-fc"); exit()
+if re.search(r'xlam|salesforce', model): print("xlam");        exit()
+# Conservative fallback — hermes is the most broadly compatible
+print("hermes")
+PYEOF
+)
+        echo ""
+        echo -e "  Available parsers:"
+        echo -e "    ${CYAN}hermes${RESET}        — Qwen, Nous-Hermes, and most modern instruct models ${DIM}(recommended default)${RESET}"
+        echo -e "    ${CYAN}llama3_json${RESET}   — Llama 3.x series"
+        echo -e "    ${CYAN}mistral${RESET}       — Mistral / Mixtral"
+        echo -e "    ${CYAN}internlm${RESET}      — InternLM series"
+        echo -e "    ${CYAN}jamba${RESET}         — AI21 Jamba"
+        echo -e "    ${CYAN}granite-20b-fc${RESET}— IBM Granite"
+        echo -e "    ${CYAN}xlam${RESET}          — Salesforce xLAM"
+        echo -e "    ${CYAN}pythonic${RESET}      — Models trained with Python-style tool call syntax"
+        echo ""
+        echo -e "  Auto-detected parser for ${GREEN}${SELECTED_MODEL##*/}${RESET}: ${YELLOW}${detected_parser}${RESET}"
+        read -rp "  Parser to use [default=${detected_parser}]: " parser_input
+        local tool_parser="${parser_input:-$detected_parser}"
+        tool_call_arg="--enable-auto-tool-choice --tool-call-parser ${tool_parser}"
+        echo -e "  ${GREEN}Tool calling enabled with parser: ${tool_parser}${RESET}"
+    else
+        echo -e "  ${DIM}Tool calling disabled.${RESET}"
+    fi
+
     # ── Validate AWQ/GPTQ model has the required quant config ─────────────────
     # vLLM does NOT quantize on the fly — the model must ship quantize_config.json.
     # Without this check the server crashes with "Cannot find the config file for awq/gptq".
@@ -772,6 +814,7 @@ PYEOF
     [[ "${CPU_OFFLOAD_GB}" != "0" ]] && CMD+=" --cpu-offload-gb ${CPU_OFFLOAD_GB}"
     [[ -n "$max_len_arg" ]]          && CMD+=" ${max_len_arg}"
     [[ -n "$token_arg" ]]            && CMD+=" ${token_arg}"
+    [[ -n "$tool_call_arg" ]]        && CMD+=" ${tool_call_arg}"
     CMD+=" --trust-remote-code"
 
     export CMD
