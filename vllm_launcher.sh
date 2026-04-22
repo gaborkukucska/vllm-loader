@@ -610,19 +610,42 @@ validate_quant_model() {
 
     local result
     result=$(python3 - "${model_id}" "${quant}" <<'PYEOF'
-import sys, urllib.request
+import sys, urllib.request, json
 
 model_id = sys.argv[1]
 quant    = sys.argv[2]
 
-# AWQ and GPTQ both store their quantization metadata in quantize_config.json
-url = f"https://huggingface.co/{model_id}/resolve/main/quantize_config.json"
-try:
+def fetch(url, timeout=8):
     req = urllib.request.Request(url, headers={"User-Agent": "vllm-launcher/1.0"})
-    urllib.request.urlopen(req, timeout=8)
-    print("yes")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read().decode()
+
+base = f"https://huggingface.co/{model_id}/resolve/main"
+
+# Check 1: legacy AutoAWQ / AutoGPTQ standalone config file
+try:
+    fetch(f"{base}/quantize_config.json")
+    print("yes"); sys.exit(0)
 except Exception:
-    print("no")
+    pass
+
+# Check 2: modern HF format — quantization_config embedded inside config.json
+# Newer official AWQ/GPTQ releases (e.g. Qwen/Qwen3-8B-AWQ) store quant
+# metadata here rather than in a separate file.
+try:
+    cfg = json.loads(fetch(f"{base}/config.json"))
+    qcfg = cfg.get("quantization_config") or {}
+    qtype = (qcfg.get("quant_type") or qcfg.get("quantization_method") or "").lower()
+    if quant in qtype:
+        print("yes"); sys.exit(0)
+except Exception:
+    pass
+
+# Check 3: name-based fallback if both remote checks fail (e.g. rate-limited)
+if quant in model_id.lower():
+    print("name_only"); sys.exit(0)
+
+print("no")
 PYEOF
 )
 
@@ -642,9 +665,11 @@ PYEOF
             echo -e "${RED}Aborting — cannot load a non-${quant^^} model with --quantization ${quant}.${RESET}"
             exit 1
         fi
+    elif [[ "$result" == "name_only" ]]; then
+        echo -e "  ${YELLOW}${quant^^} config check skipped (HF unreachable) — proceeding on model name alone ✓${RESET}"
+    else
+        echo -e "  ${GREEN}${quant^^} config found ✓${RESET}"
     fi
-
-    echo -e "  ${GREEN}${quant^^} config found ✓${RESET}"
 }
 
 # ── Final launch configuration ────────────────────────────────────────────────
