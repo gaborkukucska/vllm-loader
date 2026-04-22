@@ -608,6 +608,52 @@ print(str(suggestion))
 PYEOF
 }
 
+# ── Validate that an AWQ/GPTQ model actually has its quantization config ──────
+validate_quant_model() {
+    local model_id="$1"
+    local quant="$2"
+
+    echo -e "  ${CYAN}Verifying model has ${quant^^} quantization config...${RESET}"
+
+    local result
+    result=$(python3 - "${model_id}" "${quant}" <<'PYEOF'
+import sys, urllib.request
+
+model_id = sys.argv[1]
+quant    = sys.argv[2]
+
+# AWQ and GPTQ both store their quantization metadata in quantize_config.json
+url = f"https://huggingface.co/{model_id}/resolve/main/quantize_config.json"
+try:
+    req = urllib.request.Request(url, headers={"User-Agent": "vllm-launcher/1.0"})
+    urllib.request.urlopen(req, timeout=8)
+    print("yes")
+except Exception:
+    print("no")
+PYEOF
+)
+
+    if [[ "$result" == "no" ]]; then
+        echo -e "\n${RED}Error: '${model_id}' does not appear to be a ${quant^^}-quantized model.${RESET}"
+        echo -e "${YELLOW}  vLLM requires the model to already be quantized — it cannot quantize on the fly.${RESET}"
+        echo -e "${YELLOW}  Search HuggingFace for a pre-quantized variant, e.g.:${RESET}"
+        echo -e "    ${CYAN}https://huggingface.co/models?search=${model_id##*/}-${quant}${RESET}"
+        echo ""
+        read -rp "  Pick a different model instead? [Y/n]: " retry
+        if [[ "${retry,,}" != "n" ]]; then
+            fetch_models "${quant}"
+            select_model
+            configure_launch
+            return
+        else
+            echo -e "${RED}Aborting — cannot load a non-${quant^^} model with --quantization ${quant}.${RESET}"
+            exit 1
+        fi
+    fi
+
+    echo -e "  ${GREEN}${quant^^} config found ✓${RESET}"
+}
+
 # ── Final launch configuration ────────────────────────────────────────────────
 configure_launch() {
     echo -e "\n${BOLD}${CYAN}=== Launch Configuration ===${RESET}"
@@ -651,6 +697,13 @@ configure_launch() {
     else
         read -rp "  HuggingFace token (for gated models, leave blank if not needed): " hf_token
         [[ -n "$hf_token" ]] && token_arg="--token ${hf_token}"
+    fi
+
+    # ── Validate AWQ/GPTQ model has the required quant config ─────────────────
+    # vLLM does NOT quantize on the fly — the model must ship quantize_config.json.
+    # Without this check the server crashes with "Cannot find the config file for awq/gptq".
+    if [[ "$QUANT" == "awq" || "$QUANT" == "gptq" ]]; then
+        validate_quant_model "${SELECTED_MODEL}" "${QUANT}"
     fi
 
     # ── Calculate safe max_num_seqs ──────────────────────────────────────────
